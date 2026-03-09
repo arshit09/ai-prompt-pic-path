@@ -26,12 +26,12 @@
         <span class="source-label">Source</span>
         <span class="source-link" id="source-link"></span>
       </a>
-      <button class="reset-view-btn" id="reset-view" title="Reset View" style="display: none;">
+      <button class="reset-view-btn" id="reset-view" title="Show all images" style="display: none;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
            <path d="M3 3v5h5"/>
         </svg>
-        <span class="reset-view-label">Reset View</span>
+        <span class="reset-view-label">Show all images</span>
       </button>
       <button class="dl-all-btn" id="dl-all" title="Download visible images as ZIP">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -78,12 +78,20 @@
     </div>
     <div class="pref-row">
       <span class="pref-label">Image Click</span>
-      <select class="pref-select" id="click-action-select">
-        <option value="copy" selected>Copy Link</option>
-        <option value="newtab">Open in New Tab</option>
-        <option value="download">Download Image</option>
-        <option value="hide">Hide Image</option>
-      </select>
+      <div class="custom-select" id="click-action-custom">
+        <div class="select-trigger">
+          <span id="click-action-label">Open in New Tab</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+        <div class="select-options hidden">
+          <div class="select-option" data-value="copy">Copy Link</div>
+          <div class="select-option" data-value="newtab">Open in New Tab</div>
+          <div class="select-option" data-value="download">Download Image</div>
+          <div class="select-option" data-value="hide">Hide Image</div>
+        </div>
+      </div>
     </div>
     <div class="pref-row">
       <span class="pref-label">Show Information</span>

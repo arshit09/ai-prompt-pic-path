@@ -15,7 +15,10 @@ const themeDarkBtn    = document.getElementById('theme-dark-btn');
 const themeLightBtn   = document.getElementById('theme-light-btn');
 const badgeToggleBtn  = document.getElementById('badge-toggle-btn');
 const infoToggleBtn   = document.getElementById('info-toggle-btn');
-const clickActionSelect = document.getElementById('click-action-select');
+const customSelect      = document.getElementById('click-action-custom');
+const selectTrigger     = customSelect.querySelector('.select-trigger');
+const selectOptions     = customSelect.querySelector('.select-options');
+const clickActionLabel  = document.getElementById('click-action-label');
 
 const resetViewBtn    = document.getElementById('reset-view');
 const selectionRect   = document.getElementById('selection-rect');
@@ -52,6 +55,12 @@ document.addEventListener('click', (e) => {
       !prefPanel.contains(e.target) && e.target !== prefBtn) {
     prefPanel.classList.add('hidden');
     prefBtn.classList.remove('active');
+  }
+
+  // Close custom dropdown if clicked outside
+  if (!customSelect.contains(e.target)) {
+    customSelect.classList.remove('active');
+    selectOptions.classList.add('hidden');
   }
 });
 
@@ -106,14 +115,37 @@ infoToggleBtn.addEventListener('click', () => {
 let currentClickAction = 'copy';
 
 function applyClickAction(action) {
+  // Validate action
+  const valid = ['copy', 'newtab', 'download', 'hide'];
+  if (!valid.includes(action)) action = 'copy';
+  
   currentClickAction = action;
-  clickActionSelect.value = action;
+  
+  // Highlight the selected option in custom dropdown UI
+  customSelect.querySelectorAll('.select-option').forEach(opt => {
+    const isMatched = opt.dataset.value === action;
+    opt.classList.toggle('selected', isMatched);
+    if (isMatched) {
+      clickActionLabel.textContent = opt.textContent;
+    }
+  });
 }
 
-clickActionSelect.addEventListener('change', () => {
-  const val = clickActionSelect.value;
-  applyClickAction(val);
-  chrome.storage.local.set({ ipp_click_action: val });
+selectTrigger.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = customSelect.classList.toggle('active');
+  selectOptions.classList.toggle('hidden', !open);
+});
+
+selectOptions.addEventListener('click', (e) => {
+  const opt = e.target.closest('.select-option');
+  if (opt) {
+    const val = opt.dataset.value;
+    applyClickAction(val);
+    chrome.storage.local.set({ ipp_click_action: val });
+    selectOptions.classList.add('hidden');
+    customSelect.classList.remove('active');
+  }
 });
 
 // ── Grid size control ──────────────────────────────────────────────────────────
@@ -218,11 +250,11 @@ function renderAll(images) {
         <div class="card-url" title="${esc(img.src)}">${escHtml(img.src)}</div>
         <div class="card-actions">
           <button class="copy-btn" data-url="${esc(img.src)}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
             <span>Copy</span>
           </button>
           <button class="hide-img-btn" data-url="${esc(img.src)}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
             <span>Hide</span>
           </button>
         </div>
@@ -453,13 +485,19 @@ function buildZip(files) {
 // ── Copy ───────────────────────────────────────────────────────────────────────
 
 function copyToClipboard(text, btn) {
+  const svg  = btn.querySelector('svg');
+  const span = btn.querySelector('span');
+  const originalSvgHtml = svg?.innerHTML;
+
   const done = () => {
-    const span = btn.querySelector('span');
-    if (span) span.textContent = 'Copied!';
+    if (span) span.textContent = 'Link Copied';
     btn.classList.add('copied');
+    if (svg) svg.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+
     setTimeout(() => { 
       if (span) span.textContent = 'Copy'; 
       btn.classList.remove('copied'); 
+      if (svg && originalSvgHtml) svg.innerHTML = originalSvgHtml;
     }, 2000);
   };
   navigator.clipboard?.writeText(text).then(done).catch(() => fallbackCopy(text, done))
