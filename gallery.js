@@ -15,6 +15,7 @@ const themeDarkBtn    = document.getElementById('theme-dark-btn');
 const themeLightBtn   = document.getElementById('theme-light-btn');
 const badgeToggleBtn  = document.getElementById('badge-toggle-btn');
 const infoToggleBtn   = document.getElementById('info-toggle-btn');
+const clickActionSelect = document.getElementById('click-action-select');
 
 const resetViewBtn    = document.getElementById('reset-view');
 const selectionRect   = document.getElementById('selection-rect');
@@ -100,6 +101,21 @@ infoToggleBtn.addEventListener('click', () => {
   chrome.storage.local.set({ ipp_info_visible: !nowVisible });
 });
 
+// ── Click Action preference ────────────────────────────────────────────────────
+
+let currentClickAction = 'copy';
+
+function applyClickAction(action) {
+  currentClickAction = action;
+  clickActionSelect.value = action;
+}
+
+clickActionSelect.addEventListener('change', () => {
+  const val = clickActionSelect.value;
+  applyClickAction(val);
+  chrome.storage.local.set({ ipp_click_action: val });
+});
+
 // ── Grid size control ──────────────────────────────────────────────────────────
 
 function applySize(px) {
@@ -121,11 +137,12 @@ resetBtn.addEventListener('click', () => {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
-chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible'], ({ ipp_images = [], ipp_source, ipp_grid_size, ipp_dark_mode = true, ipp_badge_visible = false, ipp_info_visible = false }) => {
+chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible', 'ipp_click_action'], ({ ipp_images = [], ipp_source, ipp_grid_size, ipp_dark_mode = true, ipp_badge_visible = false, ipp_info_visible = false, ipp_click_action = 'copy' }) => {
   applyTheme(ipp_dark_mode);
   applySize(ipp_grid_size ?? DEFAULT_SIZE);
   applyBadgeVisible(ipp_badge_visible);
   applyInfoVisible(ipp_info_visible);
+  applyClickAction(ipp_click_action);
   if (ipp_source) {
     let preview = '';
     try { preview = new URL(ipp_source.url).hostname.replace(/^www\./, ''); } catch { preview = ipp_source.url.slice(0, 30); }
@@ -271,6 +288,33 @@ grid.addEventListener('click', (e) => {
     saveHidden();
     applyFilter();
     return;
+  }
+
+  // Click on image directly performs preference action
+  const imgWrap = e.target.closest('.card-img-wrap');
+  if (imgWrap && !e.target.closest('.card-overlay-btns')) {
+    const card = imgWrap.closest('.card');
+    const url = card.dataset.url;
+    const filename = card.dataset.filename;
+
+    switch (currentClickAction) {
+      case 'copy': {
+        const copyBtn = card.querySelector('.copy-btn');
+        copyToClipboard(url, copyBtn);
+        break;
+      }
+      case 'newtab':
+        window.open(url, '_blank');
+        break;
+      case 'download':
+        downloadSingle(url, filename);
+        break;
+      case 'hide':
+        hiddenImages.add(url.toLowerCase());
+        saveHidden();
+        applyFilter();
+        break;
+    }
   }
 });
 
