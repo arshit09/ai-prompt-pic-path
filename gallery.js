@@ -14,8 +14,28 @@ const prefPanel       = document.getElementById('pref-panel');
 const themeDarkBtn    = document.getElementById('theme-dark-btn');
 const themeLightBtn   = document.getElementById('theme-light-btn');
 const badgeToggleBtn  = document.getElementById('badge-toggle-btn');
+const infoToggleBtn   = document.getElementById('info-toggle-btn');
 
-const DEFAULT_SIZE = 190;
+const resetViewBtn    = document.getElementById('reset-view');
+const selectionRect   = document.getElementById('selection-rect');
+const actionBar       = document.getElementById('action-bar');
+const selCount        = document.getElementById('sel-count');
+const hideSelBtn      = document.getElementById('hide-sel-btn');
+const showOnlySelBtn  = document.getElementById('show-only-sel-btn');
+const cancelSelBtn    = document.getElementById('cancel-sel-btn');
+
+let hiddenImages = new Set();
+try {
+  const storedHidden = sessionStorage.getItem('ipp_hidden_images');
+  if (storedHidden) hiddenImages = new Set(JSON.parse(storedHidden));
+} catch (e) {}
+
+function saveHidden() {
+  sessionStorage.setItem('ipp_hidden_images', JSON.stringify([...hiddenImages]));
+  resetViewBtn.style.display = hiddenImages.size > 0 ? '' : 'none';
+}
+
+const DEFAULT_SIZE = 220;
 let totalImages = 0;
 
 // ── Preferences panel ──────────────────────────────────────────────────────────
@@ -67,6 +87,19 @@ badgeToggleBtn.addEventListener('click', () => {
   chrome.storage.local.set({ ipp_badge_visible: nowVisible });
 });
 
+// ── Info visibility ────────────────────────────────────────────────────────────
+
+function applyInfoVisible(visible) {
+  document.body.classList.toggle('info-hidden', !visible);
+  infoToggleBtn.classList.toggle('on', visible);
+}
+
+infoToggleBtn.addEventListener('click', () => {
+  const nowVisible = !document.body.classList.contains('info-hidden');
+  applyInfoVisible(!nowVisible);
+  chrome.storage.local.set({ ipp_info_visible: !nowVisible });
+});
+
 // ── Grid size control ──────────────────────────────────────────────────────────
 
 function applySize(px) {
@@ -88,10 +121,11 @@ resetBtn.addEventListener('click', () => {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
-chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible'], ({ ipp_images = [], ipp_source, ipp_grid_size, ipp_dark_mode = true, ipp_badge_visible = true }) => {
+chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible'], ({ ipp_images = [], ipp_source, ipp_grid_size, ipp_dark_mode = true, ipp_badge_visible = false, ipp_info_visible = false }) => {
   applyTheme(ipp_dark_mode);
   applySize(ipp_grid_size ?? DEFAULT_SIZE);
   applyBadgeVisible(ipp_badge_visible);
+  applyInfoVisible(ipp_info_visible);
   if (ipp_source) {
     let preview = '';
     try { preview = new URL(ipp_source.url).hostname.replace(/^www\./, ''); } catch { preview = ipp_source.url.slice(0, 30); }
@@ -99,7 +133,9 @@ chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark
     sourceWrapLink.href       = ipp_source.url;
     sourceWrapLink.title      = ipp_source.url;
   }
+  saveHidden();
   renderAll(ipp_images);
+  applyFilter(); // make sure to hide items if reload happens
 });
 
 // ── Live refresh for sidebar mode (images arrive after the panel opens) ────────
@@ -122,6 +158,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     filterEl.value = '';
     emptyEl.classList.add('hidden');
     renderAll(changes.ipp_images.newValue ?? []);
+    applyFilter();
   }
 });
 
@@ -162,7 +199,16 @@ function renderAll(images) {
       <div class="card-body">
         <div class="card-name" title="${esc(img.alt || img.filename)}">${escHtml(img.alt || img.filename)}</div>
         <div class="card-url" title="${esc(img.src)}">${escHtml(img.src)}</div>
-        <button class="copy-btn" data-url="${esc(img.src)}">Copy URL</button>
+        <div class="card-actions">
+          <button class="copy-btn" data-url="${esc(img.src)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy</span>
+          </button>
+          <button class="hide-img-btn" data-url="${esc(img.src)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Hide</span>
+          </button>
+        </div>
       </div>`;
 
     fragment.appendChild(card);
@@ -184,6 +230,14 @@ function applyFilter() {
   let shown = 0;
 
   for (const card of grid.children) {
+    const isHiddenUser = hiddenImages.has(card.dataset.src.toLowerCase());
+    card.classList.toggle('hidden-user', isHiddenUser);
+    
+    if (isHiddenUser) {
+      card.classList.add('hidden');
+      continue;
+    }
+
     const match = !q || card.dataset.src.includes(q) || card.dataset.alt.includes(q);
     card.classList.toggle('hidden', !match);
     if (match) shown++;
@@ -208,7 +262,16 @@ grid.addEventListener('click', (e) => {
   if (copyBtn) { copyToClipboard(copyBtn.dataset.url, copyBtn); return; }
 
   const dlBtn = e.target.closest('.card-dl');
-  if (dlBtn) downloadSingle(dlBtn.dataset.url, dlBtn.dataset.filename);
+  if (dlBtn) { downloadSingle(dlBtn.dataset.url, dlBtn.dataset.filename); return; }
+  
+  const hideBtn = e.target.closest('.hide-img-btn');
+  if (hideBtn) {
+    const url = hideBtn.dataset.url.toLowerCase();
+    hiddenImages.add(url);
+    saveHidden();
+    applyFilter();
+    return;
+  }
 });
 
 grid.addEventListener('error', (e) => {
@@ -347,9 +410,13 @@ function buildZip(files) {
 
 function copyToClipboard(text, btn) {
   const done = () => {
-    btn.textContent = 'Copied!';
+    const span = btn.querySelector('span');
+    if (span) span.textContent = 'Copied!';
     btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'Copy URL'; btn.classList.remove('copied'); }, 2000);
+    setTimeout(() => { 
+      if (span) span.textContent = 'Copy'; 
+      btn.classList.remove('copied'); 
+    }, 2000);
   };
   navigator.clipboard?.writeText(text).then(done).catch(() => fallbackCopy(text, done))
     ?? fallbackCopy(text, done);
@@ -403,3 +470,157 @@ function esc(s) {
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// ── Marquee Selection ────────────────────────────────────────────────────────
+let isSelecting = false;
+let startX = 0, startY = 0;
+let hasDragged = false;
+
+document.addEventListener('mousedown', (e) => {
+  hasDragged = false;
+  if (e.target.closest('.card') || e.target.closest('.header') || e.target.closest('.footer') || e.target.closest('.action-bar') || e.target.closest('.pref-panel')) return;
+  if (e.button !== 0) return;
+  
+  isSelecting = true;
+  startX = e.clientX;
+  startY = e.clientY;
+  
+  document.body.classList.add('selecting');
+  
+  selectionRect.classList.remove('hidden');
+  selectionRect.style.left = startX + 'px';
+  selectionRect.style.top = startY + 'px';
+  selectionRect.style.width = '0px';
+  selectionRect.style.height = '0px';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isSelecting) return;
+  
+  e.preventDefault();
+  
+  const width = Math.abs(e.clientX - startX);
+  const height = Math.abs(e.clientY - startY);
+  if (width > 3 || height > 3) {
+    hasDragged = true;
+  }
+  
+  const left = Math.min(startX, e.clientX);
+  const top = Math.min(startY, e.clientY);
+  
+  selectionRect.style.left = left + 'px';
+  selectionRect.style.top = top + 'px';
+  selectionRect.style.width = width + 'px';
+  selectionRect.style.height = height + 'px';
+  
+  const rect = selectionRect.getBoundingClientRect();
+  
+  for (const card of grid.children) {
+    if (card.classList.contains('hidden') || card.classList.contains('hidden-user')) continue;
+    
+    const cardRect = card.getBoundingClientRect();
+    const isIntersecting = !(rect.right < cardRect.left || 
+                             rect.left > cardRect.right || 
+                             rect.bottom < cardRect.top || 
+                             rect.top > cardRect.bottom);
+                             
+    card.classList.toggle('selected', isIntersecting);
+  }
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (!isSelecting) return;
+  isSelecting = false;
+  document.body.classList.remove('selecting');
+  selectionRect.classList.add('hidden');
+  updateActionBar(e.clientX, e.clientY);
+});
+
+function updateActionBar(mouseX, mouseY) {
+  const selectedCount = grid.querySelectorAll('.card.selected').length;
+  if (selectedCount > 0) {
+    selCount.textContent = `${selectedCount} selected`;
+    actionBar.classList.remove('hidden');
+
+    if (mouseX !== undefined && mouseY !== undefined) {
+      // Small delay to let browser calculate correct dimensions for new vertical layout
+      requestAnimationFrame(() => {
+        const gap = 12;
+        const barRect = actionBar.getBoundingClientRect();
+        const margin = 20;
+
+        let left = mouseX - (barRect.width / 2);
+        let top = mouseY + gap;
+
+        // Ensure it stays within viewport horizontally
+        if (left + barRect.width > window.innerWidth - margin) {
+          left = window.innerWidth - barRect.width - margin;
+        }
+        if (left < margin) {
+          left = margin;
+        }
+
+        // Check bottom edge
+        if (top + barRect.height > window.innerHeight - margin) {
+          // Flip above cursor if no space below
+          top = mouseY - barRect.height - gap;
+        }
+        
+        // Final safety check for top edge
+        if (top < margin) top = margin;
+
+        actionBar.style.left = left + 'px';
+        actionBar.style.top = top + 'px';
+        actionBar.style.bottom = 'auto';
+        actionBar.style.transform = 'none';
+      });
+    }
+  } else {
+    actionBar.classList.add('hidden');
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (hasDragged) return;
+  if (e.target.closest('.header') || e.target.closest('.footer') || e.target.closest('.action-bar') || e.target.closest('.pref-panel')) return;
+  if (e.target.closest('button') || e.target.closest('a')) return;
+
+  grid.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  updateActionBar();
+});
+
+hideSelBtn.addEventListener('click', () => {
+  const selected = grid.querySelectorAll('.card.selected');
+  for (const card of selected) {
+    hiddenImages.add(card.dataset.src.toLowerCase());
+    card.classList.remove('selected');
+  }
+  saveHidden();
+  updateActionBar();
+  applyFilter();
+});
+
+showOnlySelBtn.addEventListener('click', () => {
+  const allVisible = grid.querySelectorAll('.card:not(.hidden-user):not(.hidden)');
+  for (const card of allVisible) {
+    if (!card.classList.contains('selected')) {
+      hiddenImages.add(card.dataset.src.toLowerCase());
+    } else {
+      card.classList.remove('selected');
+    }
+  }
+  saveHidden();
+  updateActionBar();
+  applyFilter();
+});
+
+cancelSelBtn.addEventListener('click', () => {
+  grid.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  updateActionBar();
+});
+
+resetViewBtn.addEventListener('click', () => {
+  hiddenImages.clear();
+  saveHidden();
+  applyFilter();
+});
