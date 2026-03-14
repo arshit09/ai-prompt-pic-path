@@ -169,12 +169,28 @@ resetBtn.addEventListener('click', () => {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
-chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible', 'ipp_click_action'], ({ ipp_images = [], ipp_source, ipp_grid_size, ipp_dark_mode = true, ipp_badge_visible = false, ipp_info_visible = false, ipp_click_action = 'copy' }) => {
+// ── Bootstrap ──────────────────────────────────────────────────────────────────
+
+let lastImages = [];
+let needsRefresh = false;
+
+chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible', 'ipp_click_action'], (data) => {
+  const { 
+    ipp_images = [], 
+    ipp_source, 
+    ipp_grid_size, 
+    ipp_dark_mode = true, 
+    ipp_badge_visible = false, 
+    ipp_info_visible = false, 
+    ipp_click_action = 'copy' 
+  } = data;
+
   applyTheme(ipp_dark_mode);
   applySize(ipp_grid_size ?? DEFAULT_SIZE);
   applyBadgeVisible(ipp_badge_visible);
   applyInfoVisible(ipp_info_visible);
   applyClickAction(ipp_click_action);
+  
   if (ipp_source) {
     let preview = '';
     try { preview = new URL(ipp_source.url).hostname.replace(/^www\./, ''); } catch { preview = ipp_source.url.slice(0, 30); }
@@ -182,17 +198,17 @@ chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark
     sourceWrapLink.href       = ipp_source.url;
     sourceWrapLink.title      = ipp_source.url;
   }
+  
   saveHidden();
+  lastImages = ipp_images;
   renderAll(ipp_images);
-  applyFilter(); // make sure to hide items if reload happens
 });
 
 // ── Live refresh for sidebar mode (images arrive after the panel opens) ────────
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (!changes.ipp_images && !changes.ipp_source) return;
-
+  
   const newSource = changes.ipp_source?.newValue;
   if (newSource) {
     let preview = '';
@@ -204,17 +220,42 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
   if (changes.ipp_images) {
     if (window._isReordering) return;
-    grid.innerHTML = '';
-    filterEl.value = '';
-    emptyEl.classList.add('hidden');
-    renderAll(changes.ipp_images.newValue ?? []);
-    applyFilter();
+    lastImages = changes.ipp_images.newValue ?? [];
+    
+    if (document.visibilityState === 'hidden') {
+      needsRefresh = true;
+    } else {
+      doRefresh();
+    }
   }
 });
 
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && needsRefresh) {
+    needsRefresh = false;
+    doRefresh();
+  }
+});
+
+function doRefresh() {
+  grid.innerHTML = '';
+  filterEl.value = '';
+  emptyEl.classList.add('hidden');
+  renderAll(lastImages);
+}
+
 // ── Render all cards once ──────────────────────────────────────────────────────
 
+// ── Render all cards incrementally ──────────────────────────────────────────
+
+let renderTaskId = null;
+
 function renderAll(images) {
+  if (renderTaskId) {
+    cancelAnimationFrame(renderTaskId);
+    renderTaskId = null;
+  }
+
   totalImages = images.length;
   setCount(totalImages, totalImages);
 
@@ -223,50 +264,88 @@ function renderAll(images) {
     return;
   }
 
-  const badge = { img: 'IMG', srcset: 'SRC', 'css-bg': 'CSS' };
+  const badgeMap = { img: 'IMG', srcset: 'SRC', 'css-bg': 'CSS' };
   const DL_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
   const OPEN_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
+  const COPY_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`;
+  const HIDE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
 
-  const fragment = document.createDocumentFragment();
+  let index = 0;
+  const CHUNK_SIZE = 48; // Render 48 images per frame for 120Hz/60Hz smoothness
 
-  for (const img of images) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.draggable = true;
-    card.dataset.src      = img.src.toLowerCase();
-    card.dataset.alt      = img.alt.toLowerCase();
-    card.dataset.url      = img.src;
-    card.dataset.filename = img.filename;
-    card.dataset.type     = img.type;
+  function renderChunk() {
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(index + CHUNK_SIZE, images.length);
+    const q = filterEl.value.toLowerCase().trim();
 
-    card.innerHTML = `
-      <div class="card-img-wrap">
-        <img class="card-img" src="${esc(img.src)}" alt="${esc(img.alt)}" loading="lazy" decoding="async"/>
-        <span class="card-badge">${badge[img.type] ?? 'IMG'}</span>
-        <div class="card-overlay-btns">
-          <a class="card-icon-btn" href="${esc(img.src)}" target="_blank" rel="noopener" title="Open full image">${OPEN_ICON}</a>
-          <button class="card-icon-btn card-dl" data-url="${esc(img.src)}" data-filename="${esc(img.filename)}" title="Download image">${DL_ICON}</button>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="card-name" title="${esc(img.alt || img.filename)}">${escHtml(img.alt || img.filename)}</div>
-        <div class="card-url" title="${esc(img.src)}">${escHtml(img.src)}</div>
-        <div class="card-actions">
-          <button class="copy-btn" data-url="${esc(img.src)}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-            <span>Copy</span>
-          </button>
-          <button class="hide-img-btn" data-url="${esc(img.src)}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-            <span>Hide</span>
-          </button>
-        </div>
-      </div>`;
+    for (; index < end; index++) {
+      const img = images[index];
+      const card = createCard(img, badgeMap, OPEN_ICON, DL_ICON, COPY_ICON, HIDE_ICON);
+      
+      // Post-creation filter check to avoid separate applyFilter pass
+      const isHiddenUser = hiddenImages.has(img.src.toLowerCase());
+      if (isHiddenUser) {
+        card.classList.add('hidden-user', 'hidden');
+      } else if (q) {
+        const match = img.src.toLowerCase().includes(q) || img.alt.toLowerCase().includes(q);
+        card.classList.toggle('hidden', !match);
+      }
+      
+      fragment.appendChild(card);
+    }
 
-    fragment.appendChild(card);
+    grid.appendChild(fragment);
+
+    if (index < images.length) {
+      renderTaskId = requestAnimationFrame(renderChunk);
+    } else {
+      renderTaskId = null;
+      // Final count update once everything is rendered
+      applyFilter(); 
+    }
   }
 
-  grid.appendChild(fragment);
+  renderChunk();
+}
+
+function createCard(img, badgeMap, OPEN_ICON, DL_ICON, COPY_ICON, HIDE_ICON) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.draggable = true;
+  card.dataset.src      = img.src.toLowerCase();
+  card.dataset.alt      = img.alt.toLowerCase();
+  card.dataset.url      = img.src;
+  card.dataset.filename = img.filename;
+  card.dataset.type     = img.type;
+
+  const escapedSrc = esc(img.src);
+  const escapedAlt = esc(img.alt);
+  const escapedFilename = esc(img.filename);
+
+  card.innerHTML = `
+    <div class="card-img-wrap">
+      <img class="card-img" src="${escapedSrc}" alt="${escapedAlt}" loading="lazy" decoding="async"/>
+      <span class="card-badge">${badgeMap[img.type] ?? 'IMG'}</span>
+      <div class="card-overlay-btns">
+        <a class="card-icon-btn" href="${escapedSrc}" target="_blank" rel="noopener" title="Open full image">${OPEN_ICON}</a>
+        <button class="card-icon-btn card-dl" data-url="${escapedSrc}" data-filename="${escapedFilename}" title="Download image">${DL_ICON}</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="card-name" title="${escapedAlt || escapedFilename}">${escHtml(img.alt || img.filename)}</div>
+      <div class="card-url" title="${escapedSrc}">${escHtml(img.src)}</div>
+      <div class="card-actions">
+        <button class="copy-btn" data-url="${escapedSrc}">
+          ${COPY_ICON}
+          <span>Copy</span>
+        </button>
+        <button class="hide-img-btn" data-url="${escapedSrc}">
+          ${HIDE_ICON}
+          <span>Hide</span>
+        </button>
+      </div>
+    </div>`;
+  return card;
 }
 
 // ── Filter — show/hide existing cards, no DOM rebuild ─────────────────────────
