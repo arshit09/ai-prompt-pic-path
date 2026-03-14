@@ -507,6 +507,8 @@ body {
   cursor: grab;
   user-select: none;
   contain: layout style;
+  content-visibility: auto;
+  contain-intrinsic-size: 220px 330px; /* Approximate based on default size and aspect ratio */
 }
 
 .card:active {

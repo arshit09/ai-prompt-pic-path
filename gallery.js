@@ -159,7 +159,9 @@ function applySize(px) {
 sizeSlider.addEventListener('input', () => {
   const size = +sizeSlider.value;
   applySize(size);
-  chrome.storage.local.set({ ipp_grid_size: size });
+  chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible', 'ipp_click_action'], (data) => {
+    chrome.storage.local.set({ ipp_grid_size: size });
+  });
 });
 
 resetBtn.addEventListener('click', () => {
@@ -167,12 +169,39 @@ resetBtn.addEventListener('click', () => {
   chrome.storage.local.remove('ipp_grid_size');
 });
 
-// ── Bootstrap ──────────────────────────────────────────────────────────────────
-
-// ── Bootstrap ──────────────────────────────────────────────────────────────────
+// ── Sync Cache Restore (provides "instant" feel for reloads/discarded tabs) ───
 
 let lastImages = [];
-let needsRefresh = false;
+
+try {
+  const cSource = sessionStorage.getItem('ipp_source_cache');
+  if (cSource) setSourceUI(JSON.parse(cSource));
+  
+  const cImages = sessionStorage.getItem('ipp_images_cache');
+  if (cImages) {
+    lastImages = JSON.parse(cImages);
+    if (lastImages.length) renderAll(lastImages);
+  }
+} catch (e) {}
+
+function setSourceUI(src) {
+  if (!src) return;
+  let preview = '';
+  try { preview = new URL(src.url).hostname.replace(/^www\./, ''); } catch { preview = src.url.slice(0, 30); }
+  sourceLink.textContent = preview;
+  sourceWrapLink.href    = src.url;
+  sourceWrapLink.title   = src.url;
+}
+
+function areImagesSame(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  if (a.length === 0) return true;
+  // Fast check: first, last, and middle
+  if (a[0].src !== b[0].src) return false;
+  if (a[a.length - 1].src !== b[b.length - 1].src) return false;
+  const mid = a.length >> 1;
+  return a[mid].src === b[mid].src;
+}
 
 chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark_mode', 'ipp_badge_visible', 'ipp_info_visible', 'ipp_click_action'], (data) => {
   const { 
@@ -192,56 +221,47 @@ chrome.storage.local.get(['ipp_images', 'ipp_source', 'ipp_grid_size', 'ipp_dark
   applyClickAction(ipp_click_action);
   
   if (ipp_source) {
-    let preview = '';
-    try { preview = new URL(ipp_source.url).hostname.replace(/^www\./, ''); } catch { preview = ipp_source.url.slice(0, 30); }
-    sourceLink.textContent    = preview;
-    sourceWrapLink.href       = ipp_source.url;
-    sourceWrapLink.title      = ipp_source.url;
+    setSourceUI(ipp_source);
+    sessionStorage.setItem('ipp_source_cache', JSON.stringify(ipp_source));
   }
   
   saveHidden();
-  lastImages = ipp_images;
-  renderAll(ipp_images);
+  
+  if (!areImagesSame(lastImages, ipp_images)) {
+    lastImages = ipp_images;
+    doRefresh();
+  }
+  sessionStorage.setItem('ipp_images_cache', JSON.stringify(ipp_images));
 });
 
-// ── Live refresh for sidebar mode (images arrive after the panel opens) ────────
+// ── Live refresh (background update enabled for seamless tab switching) ────────
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   
   const newSource = changes.ipp_source?.newValue;
   if (newSource) {
-    let preview = '';
-    try { preview = new URL(newSource.url).hostname.replace(/^www\./, ''); } catch { preview = newSource.url.slice(0, 30); }
-    sourceLink.textContent = preview;
-    sourceWrapLink.href    = newSource.url;
-    sourceWrapLink.title   = newSource.url;
+    setSourceUI(newSource);
+    sessionStorage.setItem('ipp_source_cache', JSON.stringify(newSource));
   }
 
   if (changes.ipp_images) {
     if (window._isReordering) return;
-    lastImages = changes.ipp_images.newValue ?? [];
+    const newVal = changes.ipp_images.newValue ?? [];
     
-    if (document.visibilityState === 'hidden') {
-      needsRefresh = true;
-    } else {
-      doRefresh();
+    if (!areImagesSame(lastImages, newVal)) {
+      lastImages = newVal;
+      doRefresh(); // Update content even if hidden
+      sessionStorage.setItem('ipp_images_cache', JSON.stringify(newVal));
     }
   }
 });
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && needsRefresh) {
-    needsRefresh = false;
-    doRefresh();
-  }
-});
+
 
 function doRefresh() {
-  grid.innerHTML = '';
-  filterEl.value = '';
   emptyEl.classList.add('hidden');
-  renderAll(lastImages);
+  renderAll(lastImages, true); // Atomic refresh
 }
 
 // ── Render all cards once ──────────────────────────────────────────────────────
@@ -250,16 +270,18 @@ function doRefresh() {
 
 let renderTaskId = null;
 
-function renderAll(images) {
+function renderAll(images, isAtomic = false) {
   if (renderTaskId) {
     cancelAnimationFrame(renderTaskId);
     renderTaskId = null;
   }
 
   totalImages = images.length;
-  setCount(totalImages, totalImages);
+  // If not atomic (initial load), we update count immediately
+  if (!isAtomic) setCount(totalImages, totalImages);
 
   if (!images.length) {
+    grid.innerHTML = '';
     showEmpty('No images found on this page.');
     return;
   }
@@ -271,41 +293,55 @@ function renderAll(images) {
   const HIDE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
 
   let index = 0;
-  const CHUNK_SIZE = 48; // Render 48 images per frame for 120Hz/60Hz smoothness
+  const CHUNK_SIZE = 64; 
+  const INITIAL_BATCH = 100; // Render more upfront sync to fill most screens
 
-  function renderChunk() {
+  let shownCount = 0;
+  const q = filterEl.value.toLowerCase().trim();
+
+  function renderChunk(size) {
     const fragment = document.createDocumentFragment();
-    const end = Math.min(index + CHUNK_SIZE, images.length);
-    const q = filterEl.value.toLowerCase().trim();
+    const currentChunkSize = size || CHUNK_SIZE;
+    const end = Math.min(index + currentChunkSize, images.length);
 
     for (; index < end; index++) {
       const img = images[index];
       const card = createCard(img, badgeMap, OPEN_ICON, DL_ICON, COPY_ICON, HIDE_ICON);
       
-      // Post-creation filter check to avoid separate applyFilter pass
       const isHiddenUser = hiddenImages.has(img.src.toLowerCase());
       if (isHiddenUser) {
         card.classList.add('hidden-user', 'hidden');
       } else if (q) {
         const match = img.src.toLowerCase().includes(q) || img.alt.toLowerCase().includes(q);
         card.classList.toggle('hidden', !match);
+        if (match) shownCount++;
+      } else {
+        shownCount++;
       }
       
       fragment.appendChild(card);
     }
 
-    grid.appendChild(fragment);
+    if (index <= INITIAL_BATCH && isAtomic) {
+      grid.replaceChildren(fragment); // Atomic swap for first batch
+    } else {
+      grid.appendChild(fragment);
+    }
+    
+    setCount(shownCount, totalImages, q);
 
     if (index < images.length) {
-      renderTaskId = requestAnimationFrame(renderChunk);
+      renderTaskId = requestAnimationFrame(() => renderChunk());
     } else {
       renderTaskId = null;
-      // Final count update once everything is rendered
-      applyFilter(); 
+      if (shownCount === 0) {
+        showEmpty(q ? `No results for "${q}"` : 'No images found on this page.');
+      }
     }
   }
 
-  renderChunk();
+  // Initial render call
+  renderChunk(INITIAL_BATCH);
 }
 
 function createCard(img, badgeMap, OPEN_ICON, DL_ICON, COPY_ICON, HIDE_ICON) {
