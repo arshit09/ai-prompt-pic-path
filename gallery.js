@@ -203,6 +203,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 
   if (changes.ipp_images) {
+    if (window._isReordering) return;
     grid.innerHTML = '';
     filterEl.value = '';
     emptyEl.classList.add('hidden');
@@ -231,10 +232,12 @@ function renderAll(images) {
   for (const img of images) {
     const card = document.createElement('div');
     card.className = 'card';
+    card.draggable = true;
     card.dataset.src      = img.src.toLowerCase();
     card.dataset.alt      = img.alt.toLowerCase();
     card.dataset.url      = img.src;
     card.dataset.filename = img.filename;
+    card.dataset.type     = img.type;
 
     card.innerHTML = `
       <div class="card-img-wrap">
@@ -705,4 +708,85 @@ resetViewBtn.addEventListener('click', () => {
   hiddenImages.clear();
   saveHidden();
   applyFilter();
+});
+
+// ── Drag and Drop Reordering ────────────────────────────────────────────────
+let draggedItem = null;
+
+grid.addEventListener('dragstart', (e) => {
+  draggedItem = e.target.closest('.card');
+  if (!draggedItem) return;
+  
+  draggedItem.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  
+  // Set transparent ghost image
+  const img = draggedItem.querySelector('.card-img');
+  if (img) {
+    e.dataTransfer.setDragImage(img, 20, 20);
+  }
+});
+
+grid.addEventListener('dragend', (e) => {
+  if (draggedItem) {
+    draggedItem.classList.remove('dragging');
+    draggedItem = null;
+  }
+  
+  grid.querySelectorAll('.card').forEach(c => c.classList.remove('drag-over'));
+  
+  // Save new order to storage
+  const currentImages = [];
+  for (const card of grid.children) {
+    if (!card.classList.contains('card')) continue;
+    currentImages.push({
+      src: card.dataset.url,
+      alt: card.dataset.alt,
+      filename: card.dataset.filename,
+      type: card.dataset.type
+    });
+  }
+  
+  // We want to avoid a full re-render loop if we're the ones who changed storage
+  window._isReordering = true;
+  chrome.storage.local.set({ ipp_images: currentImages }, () => {
+    setTimeout(() => { window._isReordering = false; }, 100);
+  });
+});
+
+grid.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const target = e.target.closest('.card');
+  if (!target || target === draggedItem) return;
+
+  const rect = target.getBoundingClientRect();
+  const midX = rect.left + rect.width / 2;
+  const midY = rect.top + rect.height / 2;
+  
+  // Determine if we should insert before or after
+  const isAfter = (e.clientX > midX && e.clientY > rect.top) || e.clientY > midY;
+  
+  if (isAfter) {
+    if (target.nextSibling !== draggedItem) {
+      grid.insertBefore(draggedItem, target.nextSibling);
+    }
+  } else {
+    if (target !== draggedItem) {
+      grid.insertBefore(draggedItem, target);
+    }
+  }
+});
+
+grid.addEventListener('dragenter', (e) => {
+  const target = e.target.closest('.card');
+  if (target && target !== draggedItem) {
+    target.classList.add('drag-over');
+  }
+});
+
+grid.addEventListener('dragleave', (e) => {
+  const target = e.target.closest('.card');
+  if (target && target !== draggedItem) {
+    target.classList.remove('drag-over');
+  }
 });

@@ -502,6 +502,24 @@ body {
   flex-direction: column;
   transition: border-color 0.18s, box-shadow 0.18s;
   position: relative;
+  cursor: grab;
+  user-select: none;
+}
+
+.card:active {
+  cursor: grabbing;
+}
+
+.card.dragging {
+  opacity: 0.4;
+  scale: 0.95;
+  border: 2px dashed var(--accent);
+  box-shadow: none;
+}
+
+.card.drag-over {
+  border-color: var(--accent);
+  transform: translateY(-4px);
 }
 
 .card:hover {
