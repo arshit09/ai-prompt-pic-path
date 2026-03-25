@@ -675,18 +675,40 @@ function escHtml(s) {
 let isSelecting = false;
 let startX = 0, startY = 0;
 let hasDragged = false;
+const selectedDuringDrag = new Set();
+
+function updateSelectionFromRect() {
+  if (!isSelecting) return;
+  const rect = selectionRect.getBoundingClientRect();
+
+  for (const card of grid.children) {
+    if (card.classList.contains('hidden') || card.classList.contains('hidden-user')) continue;
+
+    const cardRect = card.getBoundingClientRect();
+    const isIntersecting = !(rect.right < cardRect.left ||
+                             rect.left > cardRect.right ||
+                             rect.bottom < cardRect.top ||
+                             rect.top > cardRect.bottom);
+
+    if (isIntersecting) {
+      selectedDuringDrag.add(card);
+      card.classList.add('selected');
+    }
+  }
+}
 
 document.addEventListener('mousedown', (e) => {
   hasDragged = false;
   if (e.target.closest('.card') || e.target.closest('.header') || e.target.closest('.footer') || e.target.closest('.action-bar') || e.target.closest('.pref-panel')) return;
   if (e.button !== 0) return;
-  
+
   isSelecting = true;
+  selectedDuringDrag.clear();
   startX = e.clientX;
   startY = e.clientY;
-  
+
   document.body.classList.add('selecting');
-  
+
   selectionRect.classList.remove('hidden');
   selectionRect.style.left = startX + 'px';
   selectionRect.style.top = startY + 'px';
@@ -696,41 +718,34 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('mousemove', (e) => {
   if (!isSelecting) return;
-  
+
   e.preventDefault();
-  
+
   const width = Math.abs(e.clientX - startX);
   const height = Math.abs(e.clientY - startY);
   if (width > 3 || height > 3) {
     hasDragged = true;
   }
-  
+
   const left = Math.min(startX, e.clientX);
   const top = Math.min(startY, e.clientY);
-  
+
   selectionRect.style.left = left + 'px';
   selectionRect.style.top = top + 'px';
   selectionRect.style.width = width + 'px';
   selectionRect.style.height = height + 'px';
-  
-  const rect = selectionRect.getBoundingClientRect();
-  
-  for (const card of grid.children) {
-    if (card.classList.contains('hidden') || card.classList.contains('hidden-user')) continue;
-    
-    const cardRect = card.getBoundingClientRect();
-    const isIntersecting = !(rect.right < cardRect.left || 
-                             rect.left > cardRect.right || 
-                             rect.bottom < cardRect.top || 
-                             rect.top > cardRect.bottom);
-                             
-    card.classList.toggle('selected', isIntersecting);
-  }
+
+  updateSelectionFromRect();
 });
+
+window.addEventListener('scroll', () => {
+  updateSelectionFromRect();
+}, true);
 
 document.addEventListener('mouseup', (e) => {
   if (!isSelecting) return;
   isSelecting = false;
+  selectedDuringDrag.clear();
   document.body.classList.remove('selecting');
   selectionRect.classList.add('hidden');
   updateActionBar(e.clientX, e.clientY);

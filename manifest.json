@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Picath",
+  "name": "Picpath",
   "version": "1.0",
   "description": "View all images on the page in a gallery with easy one-click copy.",
   "permissions": ["activeTab", "scripting", "storage", "downloads"],
